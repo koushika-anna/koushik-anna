@@ -1,0 +1,72 @@
+from flask import Flask, request, jsonify
+from models import db, Task, SubTask
+from flask_mail import Mail, Message
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__)
+
+# --- Database Configuration ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///tasks.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
+
+# --- Email Configuration ---
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER')
+app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_APP_PASSWORD') # Use an App Password for Gmail
+mail = Mail(app)
+
+# --- API Endpoints ---
+
+@app.route('/tasks', methods=['POST'])
+def create_task():
+    data = request.json
+    new_task = Task(title=data['title'], priority=data.get('priority', 'Medium'))
+
+    if 'sub_tasks' in data:
+        for sub_task_title in data['sub_tasks']:
+            new_task.sub_tasks.append(SubTask(title=sub_task_title))
+
+    db.session.add(new_task)
+    db.session.commit()
+    return jsonify(new_task.to_dict()), 201
+
+@app.route('/tasks', methods=['GET'])
+def get_tasks():
+    tasks = Task.query.all()
+    return jsonify([task.to_dict() for task in tasks])
+
+@app.route('/tasks/<int:task_id>/complete', methods=['PUT'])
+def complete_task(task_id):
+    task = Task.query.get_or_404(task_id)
+    task.completed = True
+    db.session.commit()
+    return jsonify(task.to_dict())
+
+# --- Email Sending Logic ---
+def send_reminder_email(task_title, recipient_email):
+    """Conceptual function to send reminders."""
+    try:
+        msg = Message(
+            subject=f"Reminder: Your task '{task_title}' is due soon!",
+            sender=os.getenv('EMAIL_USER'),
+            recipients=[recipient_email]
+        )
+        msg.body = f"This is a reminder that your task, '{task_title}', is approaching its deadline. Don't forget to complete it!"
+        mail.send(msg)
+        print("Email sent successfully!")
+    except Exception as e:
+        print(f"Error sending email: {e}")
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()  # Creates the database tables
+    app.run(debug=True, port=5001)
+
+# Note: A real app would use a background scheduler (like APScheduler)
+# to periodically check for upcoming tasks and call send_reminder_email.
